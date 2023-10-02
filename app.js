@@ -187,17 +187,16 @@ app.get("/tweets/:tweetId/", authenticateToken, async (request, response) => {
 
   const getFollowingUserTweets = `
   SELECT tweet.tweet,
-  COUNT(like.like_id) AS likes,
-  COUNT(reply.reply) AS replies,
-  tweet.date_time AS dateTime
-  FROM ((tweet INNER JOIN reply ON tweet.tweet_id = reply.tweet_id) AS T 
-  INNER JOIN like ON T.tweet_id = like.tweet_id) AS F INNER JOIN follower 
-  ON F.user_id = follower.following_user_id
+  (SELECT COUNT(like_id) FROM like WHERE tweet_id = ${tweetId}) AS likes,
+  (SELECT COUNT(reply_id) FROM reply WHERE tweet_id = ${tweetId}) AS replies,
+  date_time AS dateTime
+  FROM tweet INNER JOIN follower 
+  ON tweet.user_id = follower.following_user_id
   WHERE tweet.tweet_id = ${tweetId} AND 
   follower.follower_user_id = ${loggedInUser.user_id};
   `;
   const tweets = await db.get(getFollowingUserTweets);
-  if (tweets.tweet === null) {
+  if (tweets === undefined) {
     response.status(401);
     response.send("Invalid Request");
   } else {
@@ -219,15 +218,15 @@ app.get(
 
     const getLikedUsers = `
   SELECT user.username
-  FROM tweet INNER JOIN like ON tweet.tweet_id = like.tweet_id 
-  INNER JOIN user ON tweet.user_id = user.user_id 
-  INNER JOIN follower ON user.user_id = follower.following_user_id 
+  FROM ((user INNER JOIN like ON user.user_id = like.user_id)AS U 
+  INNER JOIN tweet ON U.tweet_id = tweet.tweet_id) AS T 
+  INNER JOIN follower ON T.user_id = follower.following_user_id
   WHERE tweet.tweet_id = ${tweetId} AND 
   follower.follower_user_id = ${loggedInUser.user_id};
   `;
     const users = await db.all(getLikedUsers);
     //console.log(users);
-    if (users === "") {
+    if (users === undefined) {
       response.status(401);
       response.send("Invalid Request");
     } else {
@@ -277,12 +276,11 @@ app.get("/user/tweets/", authenticateToken, async (request, response) => {
   //console.log(loggedInUser);
 
   const getUserTweets = `
-  SELECT tweet.tweet,
-  COUNT(like.like_id) AS likes,
-  COUNT(reply.reply) AS replies,
-  tweet.date_time AS dateTime
-  FROM ((tweet INNER JOIN reply ON tweet.tweet_id = reply.tweet_id) AS T 
-  INNER JOIN like ON T.tweet_id = like.tweet_id)
+  SELECT tweet,
+  (SELECT COUNT(like_id) FROM like WHERE tweet_id = tweet.tweet_id) AS likes,
+  (SELECT COUNT(reply_id) FROM reply WHERE tweet_id = tweet.tweet_id) AS replies,
+  date_time AS dateTime
+  FROM tweet
   WHERE tweet.user_id = ${loggedInUser.user_id};
   `;
   const userTweets = await db.all(getUserTweets);
@@ -314,16 +312,22 @@ app.delete(
     const loggedInUser = await db.get(getLoggedInUserId);
     //console.log(loggedInUser);
 
-    const deleteTweet = `
-    DELETE FROM tweet  
-    WHERE tweet_id = ${tweetId} AND 
-    user_id = ${loggedInUser.user_id}; 
+    const getUserId = `
+    SELECT user_id FROM tweet WHERE tweet_id = ${tweetId};
     `;
-    const deletedTweet = await db.run(deleteTweet);
-    if (deletedTweet.lastID !== 0) {
+    const tweetUserId = await db.get(getUserId);
+    //console.log(tweetUserId);
+
+    if (tweetUserId === undefined) {
       response.status(401);
       response.send("Invalid Request");
     } else {
+      const deleteTweet = `
+    DELETE FROM tweet 
+    WHERE tweet.tweet_id = ${tweetId} AND 
+    user_id = ${loggedInUser.user_id}; 
+        `;
+      const deletedTweet = await db.run(deleteTweet);
       response.send("Tweet Removed");
     }
   }
